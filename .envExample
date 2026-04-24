@@ -1,0 +1,13 @@
+# DumbReader environment variables
+# Copy this file as .env, then fill in real values.
+
+# Required: OpenRouter API Key (recommended)
+VITE_OPENROUTER_API_KEY=your_openrouter_api_key_here
+
+# Optional: OpenRouter API base URL (has default value)
+VITE_OPENROUTER_BASE_URL=https://openrouter.ai/api/v1
+
+# Optional: model name (has default value)
+VITE_OPENROUTER_MODEL=google/gemini-2.5-flash-lite-preview-09-2025
+
+
