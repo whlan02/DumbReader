@@ -1,12 +1,12 @@
 # DumbReader
 
-DumbReader is a reading-assistant frontend project built with React + Vite.
+<p align="center">
+  <img src="./src/assets/IMAGE/DumbReader.png" alt="DumbReader Logo" width="220" />
+</p>
 
-## Preview
-
-### Logo
-
-<img src="./src/assets/IMAGE/DumbReader.png" alt="DumbReader Logo" width="220" />
+<p align="center">
+  A reading-assistant Web application.
+</p>
 
 ### Screenshot
 
