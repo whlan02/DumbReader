@@ -84,6 +84,21 @@ function stableTextId(text, prefix) {
   return `${prefix}-${hash.toString(16)}`
 }
 
+function isImageFile(file) {
+  return Boolean(file && typeof file.type === 'string' && file.type.startsWith('image/'))
+}
+
+function pickImageFiles(fileLikeList) {
+  return Array.from(fileLikeList || []).filter((file) => isImageFile(file))
+}
+
+function dataTransferHasImage(dataTransfer) {
+  if (!dataTransfer) return false
+  const itemList = Array.from(dataTransfer.items || [])
+  if (itemList.some((item) => item.kind === 'file' && item.type.startsWith('image/'))) return true
+  return pickImageFiles(dataTransfer.files).length > 0
+}
+
 function InteractiveTextBlock({
   as: Tag = 'p',
   children,
@@ -158,8 +173,10 @@ function App() {
   const [context, setContext] = useState({ prev: '', current: '', next: '' })
   const [contextMenu, setContextMenu] = useState({ open: false, x: 0, y: 0, sentenceId: '', sentenceText: '' })
   const [copiedTokenKey, setCopiedTokenKey] = useState('')
+  const [dragActive, setDragActive] = useState(false)
   const previewRef = useRef(null)
   const copiedTimerRef = useRef(null)
+  const dragDepthRef = useRef(0)
 
   const selectedWordsText = useMemo(() => {
     if (!selected.length) return ''
@@ -203,8 +220,8 @@ function App() {
     }
   }
 
-  const onUploadImage = async (event) => {
-    const files = Array.from(event.target.files || [])
+  const processImageFiles = async (fileLikeList) => {
+    const files = pickImageFiles(fileLikeList)
     if (files.length === 0 || ocrLoading) return
     setOcrLoading(true)
     try {
@@ -227,8 +244,12 @@ function App() {
       alert(msg)
     } finally {
       setOcrLoading(false)
-      event.target.value = ''
     }
+  }
+
+  const onUploadImage = async (event) => {
+    await processImageFiles(event.target.files)
+    event.target.value = ''
   }
 
   const injectPromptToAssistant = () => {
@@ -403,8 +424,60 @@ function App() {
     }
   }, [])
 
+  useEffect(() => {
+    const onPaste = (event) => {
+      if (ocrLoading) return
+      const itemImages = Array.from(event.clipboardData?.items || [])
+        .filter((item) => item.kind === 'file' && item.type.startsWith('image/'))
+        .map((item) => item.getAsFile())
+        .filter(Boolean)
+      const fileImages = pickImageFiles(event.clipboardData?.files)
+      const images = itemImages.length > 0 ? itemImages : fileImages
+      if (images.length === 0) return
+      event.preventDefault()
+      void processImageFiles(images)
+    }
+    window.addEventListener('paste', onPaste)
+    return () => window.removeEventListener('paste', onPaste)
+  }, [ocrLoading])
+
+  const onPageDragEnter = (event) => {
+    if (!dataTransferHasImage(event.dataTransfer) || ocrLoading) return
+    event.preventDefault()
+    dragDepthRef.current += 1
+    setDragActive(true)
+  }
+
+  const onPageDragOver = (event) => {
+    if (!dataTransferHasImage(event.dataTransfer) || ocrLoading) return
+    event.preventDefault()
+    event.dataTransfer.dropEffect = 'copy'
+    if (!dragActive) setDragActive(true)
+  }
+
+  const onPageDragLeave = (event) => {
+    if (!dataTransferHasImage(event.dataTransfer) || ocrLoading) return
+    event.preventDefault()
+    dragDepthRef.current = Math.max(0, dragDepthRef.current - 1)
+    if (dragDepthRef.current === 0) setDragActive(false)
+  }
+
+  const onPageDrop = (event) => {
+    if (!dataTransferHasImage(event.dataTransfer) || ocrLoading) return
+    event.preventDefault()
+    dragDepthRef.current = 0
+    setDragActive(false)
+    void processImageFiles(event.dataTransfer?.files)
+  }
+
   return (
-    <div className="page">
+    <div
+      className={`page ${dragActive ? 'page-drag-active' : ''}`.trim()}
+      onDragEnter={onPageDragEnter}
+      onDragOver={onPageDragOver}
+      onDragLeave={onPageDragLeave}
+      onDrop={onPageDrop}
+    >
       <header className="topbar">
         <h1>DumbReader</h1>
         <div className="topbar-actions">
@@ -601,6 +674,11 @@ function App() {
           <button type="button" onClick={askSentenceMeaning}>
             Ask
           </button>
+        </div>
+      ) : null}
+      {dragActive ? (
+        <div className="drop-overlay" role="status" aria-live="polite">
+          <div className="drop-overlay-card">松开以上传图片</div>
         </div>
       ) : null}
       <KnowledgeGraphAssistantChat />

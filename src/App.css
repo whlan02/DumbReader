@@ -1,4 +1,5 @@
 .page { min-height: 100vh; padding: 20px; padding-right: 470px; box-sizing: border-box; }
+.page-drag-active { outline: 2px dashed #60a5fa; outline-offset: -8px; }
 .topbar { display:flex; justify-content:space-between; align-items:center; margin-bottom:16px; }
 .topbar h1 { margin:0; font-size:28px; }
 .layout { display:grid; grid-template-columns: 1fr; gap:16px; }
@@ -260,6 +261,28 @@ button:disabled { opacity:.55; cursor:not-allowed; }
 
 .sentence-context-menu button:hover {
   background: #eef2ff;
+}
+
+.drop-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 15000;
+  pointer-events: none;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(30, 41, 59, 0.12);
+}
+
+.drop-overlay-card {
+  border: 2px dashed #60a5fa;
+  border-radius: 14px;
+  padding: 18px 24px;
+  background: rgba(255, 255, 255, 0.94);
+  color: #0f172a;
+  font-size: 18px;
+  font-weight: 700;
+  box-shadow: 0 12px 28px rgba(15, 23, 42, 0.18);
 }
 
 @media (max-width: 1200px) {
