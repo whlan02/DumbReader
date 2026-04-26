@@ -3,7 +3,7 @@ import ReactMarkdown from 'react-markdown'
 import rehypeRaw from 'rehype-raw'
 import { ChevronDown, Clipboard, LoaderCircle, Trash2, Upload } from 'lucide-react'
 import KnowledgeGraphAssistantChat from './components/assistant/KnowledgeGraphAssistantChat'
-import { imageToMarkdown, textToMarkdown } from './lib/openrouter'
+import { imageToMarkdown, suggestFilenameFromMarkdown, textToMarkdown } from './lib/openrouter'
 import { splitTextToSentences, tokenizeSentenceWords } from './lib/sentences'
 import './App.css'
 
@@ -17,11 +17,16 @@ However, after two weeks, he started to enjoy walking to school and talking with
 2. What changed after two weeks?
 `
 
-async function saveMarkdownToLocalFile(content) {
-  const response = await fetch('/api/save-markdown', {
+function runtimeApiUrl(pathname) {
+  if (typeof window === 'undefined') return pathname
+  return new URL(pathname, window.location.origin).toString()
+}
+
+async function saveMarkdownToLocalFile(content, preferredBaseName = '') {
+  const response = await fetch(runtimeApiUrl('/api/save-markdown'), {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ content }),
+    body: JSON.stringify({ content, preferredBaseName }),
   })
   if (!response.ok) {
     const text = await response.text()
@@ -31,7 +36,7 @@ async function saveMarkdownToLocalFile(content) {
 }
 
 async function listSavedMarkdownFiles() {
-  const response = await fetch('/api/saved-markdown/list')
+  const response = await fetch(runtimeApiUrl('/api/saved-markdown/list'))
   if (!response.ok) {
     const text = await response.text()
     throw new Error(`Failed to read directory: ${text}`)
@@ -41,7 +46,7 @@ async function listSavedMarkdownFiles() {
 }
 
 async function loadSavedMarkdownFile(name) {
-  const response = await fetch(`/api/saved-markdown/file?name=${encodeURIComponent(name)}`)
+  const response = await fetch(runtimeApiUrl(`/api/saved-markdown/file?name=${encodeURIComponent(name)}`))
   if (!response.ok) {
     const text = await response.text()
     throw new Error(`Failed to read file: ${text}`)
@@ -51,7 +56,7 @@ async function loadSavedMarkdownFile(name) {
 }
 
 async function deleteSavedMarkdownFile(name) {
-  const response = await fetch('/api/saved-markdown/delete', {
+  const response = await fetch(runtimeApiUrl('/api/saved-markdown/delete'), {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ name }),
@@ -233,7 +238,8 @@ function App() {
       }
       const mergedMarkdown = chunks.join('\n\n---\n\n') || '# OCR Result\n\nNo usable content recognized.'
       setMarkdown(mergedMarkdown)
-      const saved = await saveMarkdownToLocalFile(mergedMarkdown)
+      const suggestedName = await suggestFilenameFromMarkdown(mergedMarkdown)
+      const saved = await saveMarkdownToLocalFile(mergedMarkdown, suggestedName)
       if (saved?.fileName) setActiveSavedFile(saved.fileName)
       await refreshSavedFiles()
       setSelected([])
@@ -275,7 +281,8 @@ function App() {
       const md = await textToMarkdown(raw)
       const mergedMarkdown = md || '# Text Import\n\nNo usable Markdown was generated.'
       setMarkdown(mergedMarkdown)
-      const saved = await saveMarkdownToLocalFile(mergedMarkdown)
+      const suggestedName = await suggestFilenameFromMarkdown(mergedMarkdown)
+      const saved = await saveMarkdownToLocalFile(mergedMarkdown, suggestedName)
       if (saved?.fileName) setActiveSavedFile(saved.fileName)
       await refreshSavedFiles()
       setSelected([])

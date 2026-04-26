@@ -28,6 +28,14 @@ Requirements:
 4) Format questions and options as lists;
 5) Do not fabricate information not present in the source; mark uncertain content with [??].`
 
+const MARKDOWN_FILENAME_SYSTEM_PROMPT = `You generate concise file names for markdown notes.
+Rules:
+1) Return only the file name base text, no extension, no quotes, no explanation.
+2) Keep it short and descriptive (3-8 words).
+3) Use only letters, numbers, spaces, hyphens, and underscores.
+4) Do not include any date/time in your output.
+5) If the content is unclear, return: untitled-note`
+
 function resolveApiKey() {
   return import.meta.env.VITE_OPENROUTER_API_KEY || localStorage.getItem('openrouter_api_key') || ''
 }
@@ -111,6 +119,36 @@ export async function textToMarkdown(rawText) {
   }
   const json = await response.json()
   return json?.choices?.[0]?.message?.content?.trim() || ''
+}
+
+export async function suggestFilenameFromMarkdown(markdown) {
+  const content = String(markdown || '').trim()
+  if (!content) return 'untitled-note'
+
+  const response = await fetch(`${OPENROUTER_BASE_URL}/chat/completions`, {
+    method: 'POST',
+    headers: buildHeaders(),
+    body: JSON.stringify({
+      model: OPENROUTER_MODEL,
+      temperature: 0.1,
+      messages: [
+        { role: 'system', content: MARKDOWN_FILENAME_SYSTEM_PROMPT },
+        {
+          role: 'user',
+          content: `Generate a concise filename base for this markdown:\n\n${content.slice(0, 6000)}`,
+        },
+      ],
+    }),
+  })
+
+  if (!response.ok) {
+    const err = await response.text()
+    throw new Error(`Filename generation failed: ${response.status} ${err}`)
+  }
+
+  const json = await response.json()
+  const rawName = String(json?.choices?.[0]?.message?.content || '').trim()
+  return rawName || 'untitled-note'
 }
 
 export async function* streamAssistant(messages, abortSignal) {

@@ -1,5 +1,6 @@
 import { defineConfig } from 'vite'
 import react from '@vitejs/plugin-react'
+import { Buffer } from 'node:buffer'
 import fs from 'node:fs/promises'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
@@ -14,6 +15,41 @@ function nowFilename() {
   return `${stamp}.md`
 }
 
+function currentDateStamp() {
+  const d = new Date()
+  const pad = (n) => String(n).padStart(2, '0')
+  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`
+}
+
+function sanitizeFilenameBase(input) {
+  const raw = String(input || '').trim()
+  if (!raw) return 'untitled-note'
+  const normalized = raw
+    .toLowerCase()
+    .replace(/\.md$/i, '')
+    .replace(/[^a-z0-9 _-]+/g, ' ')
+    .replace(/[\s_-]+/g, '-')
+    .replace(/^-+|-+$/g, '')
+  return normalized || 'untitled-note'
+}
+
+async function allocateUniqueFilename(saveDir, preferredBaseName) {
+  const base = sanitizeFilenameBase(preferredBaseName)
+  const date = currentDateStamp()
+  const stem = `${base}-${date}`
+  let candidate = `${stem}.md`
+  let suffix = 2
+  while (true) {
+    try {
+      await fs.access(path.join(saveDir, candidate))
+      candidate = `${stem}-${suffix}.md`
+      suffix += 1
+    } catch {
+      return candidate
+    }
+  }
+}
+
 async function readJsonBody(req) {
   const chunks = []
   for await (const chunk of req) chunks.push(chunk)
@@ -24,7 +60,9 @@ async function readJsonBody(req) {
 function savedMarkdownPlugin() {
   const saveDir = path.join(__dirname, 'saved')
 
-  const isSafeMarkdownFilename = (name) => /^[0-9]{4}-[0-9]{2}-[0-9]{2}_[0-9]{2}-[0-9]{2}-[0-9]{2}\.md$/.test(name)
+  const isSafeMarkdownFilename = (name) =>
+    /^[a-z0-9][a-z0-9-]*\.md$/.test(name) ||
+    /^[0-9]{4}-[0-9]{2}-[0-9]{2}_[0-9]{2}-[0-9]{2}-[0-9]{2}\.md$/.test(name)
 
   const sendJson = (res, statusCode, data) => {
     res.statusCode = statusCode
@@ -33,18 +71,22 @@ function savedMarkdownPlugin() {
   }
 
   const handler = async (req, res) => {
-    const url = new URL(req.url || '/', 'http://localhost')
+    const host = req.headers.host || 'localhost'
+    const url = new URL(req.url || '/', `http://${host}`)
 
     if (url.pathname === '/api/save-markdown' && req.method === 'POST') {
       try {
         const body = await readJsonBody(req)
         const content = String(body?.content || '').trim()
+        const preferredBaseName = String(body?.preferredBaseName || '')
         if (!content) {
           sendJson(res, 400, { ok: false, error: 'content is empty' })
           return true
         }
         await fs.mkdir(saveDir, { recursive: true })
-        const fileName = nowFilename()
+        const fileName = preferredBaseName
+          ? await allocateUniqueFilename(saveDir, preferredBaseName)
+          : nowFilename()
         const filePath = path.join(saveDir, fileName)
         await fs.writeFile(filePath, `${content}\n`, 'utf8')
         sendJson(res, 200, { ok: true, fileName, relativePath: `saved/${fileName}` })
