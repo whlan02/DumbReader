@@ -97,6 +97,23 @@ function pickImageFiles(fileLikeList) {
   return Array.from(fileLikeList || []).filter((file) => isImageFile(file))
 }
 
+function extractImagesFromClipboard(clipboardData) {
+  const itemImages = Array.from(clipboardData?.items || [])
+    .filter((item) => item.kind === 'file' && item.type.startsWith('image/'))
+    .map((item) => item.getAsFile())
+    .filter(Boolean)
+  const fileImages = pickImageFiles(clipboardData?.files)
+  return itemImages.length > 0 ? itemImages : fileImages
+}
+
+function createPendingImageItem(file) {
+  return {
+    id: `${Date.now()}-${Math.random().toString(16).slice(2)}`,
+    file,
+    previewUrl: URL.createObjectURL(file),
+  }
+}
+
 function dataTransferHasImage(dataTransfer) {
   if (!dataTransfer) return false
   const itemList = Array.from(dataTransfer.items || [])
@@ -175,13 +192,18 @@ function App() {
   const [textImportOpen, setTextImportOpen] = useState(false)
   const [textImportValue, setTextImportValue] = useState('')
   const [textImportLoading, setTextImportLoading] = useState(false)
+  const [imageUploadOpen, setImageUploadOpen] = useState(false)
+  const [pendingImages, setPendingImages] = useState([])
+  const [previewImage, setPreviewImage] = useState(null)
   const [context, setContext] = useState({ prev: '', current: '', next: '' })
   const [contextMenu, setContextMenu] = useState({ open: false, x: 0, y: 0, sentenceId: '', sentenceText: '' })
   const [copiedTokenKey, setCopiedTokenKey] = useState('')
   const [dragActive, setDragActive] = useState(false)
   const previewRef = useRef(null)
+  const imageInputRef = useRef(null)
   const copiedTimerRef = useRef(null)
   const dragDepthRef = useRef(0)
+  const pendingImagesRef = useRef([])
 
   const selectedWordsText = useMemo(() => {
     if (!selected.length) return ''
@@ -253,9 +275,41 @@ function App() {
     }
   }
 
-  const onUploadImage = async (event) => {
-    await processImageFiles(event.target.files)
+  const addPendingImages = (fileLikeList) => {
+    const files = pickImageFiles(fileLikeList)
+    if (files.length === 0) return
+    setPendingImages((prev) => [
+      ...prev,
+      ...files.map((file) => createPendingImageItem(file)),
+    ])
+  }
+
+  const onUploadImage = (event) => {
+    addPendingImages(event.target.files)
     event.target.value = ''
+  }
+
+  const onProcessPendingImages = async () => {
+    if (pendingImages.length === 0 || ocrLoading) return
+    await processImageFiles(pendingImages.map((item) => item.file))
+    pendingImages.forEach((item) => URL.revokeObjectURL(item.previewUrl))
+    setPendingImages([])
+    setImageUploadOpen(false)
+  }
+
+  const removePendingImage = (id) => {
+    setPendingImages((prev) => {
+      const target = prev.find((item) => item.id === id)
+      if (target?.previewUrl) URL.revokeObjectURL(target.previewUrl)
+      return prev.filter((item) => item.id !== id)
+    })
+  }
+
+  const clearPendingImages = () => {
+    setPendingImages((prev) => {
+      prev.forEach((item) => URL.revokeObjectURL(item.previewUrl))
+      return []
+    })
   }
 
   const injectPromptToAssistant = () => {
@@ -426,27 +480,36 @@ function App() {
   }, [contextMenu.open])
 
   useEffect(() => {
+    pendingImagesRef.current = pendingImages
+  }, [pendingImages])
+
+  useEffect(() => {
     return () => {
       if (copiedTimerRef.current) window.clearTimeout(copiedTimerRef.current)
+      pendingImagesRef.current.forEach((item) => URL.revokeObjectURL(item.previewUrl))
     }
   }, [])
 
   useEffect(() => {
     const onPaste = (event) => {
-      if (ocrLoading) return
-      const itemImages = Array.from(event.clipboardData?.items || [])
-        .filter((item) => item.kind === 'file' && item.type.startsWith('image/'))
-        .map((item) => item.getAsFile())
-        .filter(Boolean)
-      const fileImages = pickImageFiles(event.clipboardData?.files)
-      const images = itemImages.length > 0 ? itemImages : fileImages
+      if (ocrLoading || !imageUploadOpen) return
+      const images = extractImagesFromClipboard(event.clipboardData)
       if (images.length === 0) return
       event.preventDefault()
-      void processImageFiles(images)
+      addPendingImages(images)
     }
     window.addEventListener('paste', onPaste)
     return () => window.removeEventListener('paste', onPaste)
-  }, [ocrLoading])
+  }, [imageUploadOpen, ocrLoading])
+
+  useEffect(() => {
+    if (!previewImage) return undefined
+    const onKeyDown = (event) => {
+      if (event.key === 'Escape') setPreviewImage(null)
+    }
+    window.addEventListener('keydown', onKeyDown)
+    return () => window.removeEventListener('keydown', onKeyDown)
+  }, [previewImage])
 
   const onPageDragEnter = (event) => {
     if (!dataTransferHasImage(event.dataTransfer) || ocrLoading) return
@@ -474,7 +537,8 @@ function App() {
     event.preventDefault()
     dragDepthRef.current = 0
     setDragActive(false)
-    void processImageFiles(event.dataTransfer?.files)
+    setImageUploadOpen(true)
+    addPendingImages(event.dataTransfer?.files)
   }
 
   return (
@@ -497,16 +561,26 @@ function App() {
           >
             <Clipboard size={16} />
           </button>
-          <label
+          <button
+            type="button"
             className="upload-btn upload-icon-btn"
-            htmlFor="upload-image"
-            aria-disabled={ocrLoading}
-            aria-label="Upload images and convert to Markdown (multi-select)"
-            data-tooltip={ocrLoading ? 'Generating Markdown...' : 'Upload images and convert to Markdown (multi-select)'}
+            aria-label="Open image upload panel"
+            data-tooltip={ocrLoading ? 'Generating Markdown...' : 'Open image upload panel'}
+            onClick={() => setImageUploadOpen(true)}
+            disabled={ocrLoading}
           >
             {ocrLoading ? <LoaderCircle size={16} className="icon-spin" /> : <Upload size={16} />}
-          </label>
-          <input id="upload-image" type="file" accept="image/*" multiple onChange={onUploadImage} disabled={ocrLoading} hidden />
+          </button>
+          <input
+            id="upload-image"
+            ref={imageInputRef}
+            type="file"
+            accept="image/*"
+            multiple
+            onChange={onUploadImage}
+            disabled={ocrLoading}
+            hidden
+          />
         </div>
       </header>
 
@@ -538,6 +612,109 @@ function App() {
               >
                 {textImportLoading ? 'Importing...' : 'Import'}
               </button>
+            </div>
+          </div>
+        </div>
+      ) : null}
+
+      {imageUploadOpen ? (
+        <div className="text-import-overlay" onMouseDown={() => (ocrLoading ? null : setImageUploadOpen(false))}>
+          <div className="image-upload-modal" onMouseDown={(e) => e.stopPropagation()}>
+            <div className="text-import-title">Upload images</div>
+            <div className="image-upload-hint">
+              Select files or paste images (Ctrl+V) into this window. Images stay in queue until you click Process.
+            </div>
+            <div className="image-upload-actions-top">
+              <button
+                type="button"
+                className="secondary-btn"
+                onClick={() => imageInputRef.current?.click()}
+                disabled={ocrLoading}
+              >
+                Choose images
+              </button>
+              <span className="image-upload-count">Pending: {pendingImages.length}</span>
+            </div>
+            <div className="pending-image-list">
+              {pendingImages.length === 0 ? (
+                <div className="saved-empty">No pending images. Choose files or paste screenshots.</div>
+              ) : (
+                pendingImages.map((item, index) => (
+                  <div key={item.id} className="pending-image-item">
+                    <img
+                      src={item.previewUrl}
+                      alt={item.file?.name || `pending-image-${index + 1}`}
+                      className="pending-image-thumb"
+                      role="button"
+                      tabIndex={0}
+                      onClick={() => setPreviewImage({ url: item.previewUrl, name: item.file?.name || `Image ${index + 1}` })}
+                      onKeyDown={(event) => {
+                        if (event.key === 'Enter' || event.key === ' ') {
+                          event.preventDefault()
+                          setPreviewImage({ url: item.previewUrl, name: item.file?.name || `Image ${index + 1}` })
+                        }
+                      }}
+                    />
+                    <div className="pending-image-meta">
+                      <div className="pending-image-name">{item.file?.name || `pasted-image-${index + 1}.png`}</div>
+                      <div className="pending-image-size">{Math.max(1, Math.round((item.file?.size || 0) / 1024))} KB</div>
+                    </div>
+                    <button
+                      type="button"
+                      className="saved-delete-btn"
+                      title="Remove"
+                      aria-label="Remove pending image"
+                      onClick={() => removePendingImage(item.id)}
+                      disabled={ocrLoading}
+                    >
+                      <Trash2 size={13} />
+                    </button>
+                  </div>
+                ))
+              )}
+            </div>
+            <div className="text-import-actions">
+              <button
+                type="button"
+                className="secondary-btn"
+                onClick={() => setImageUploadOpen(false)}
+                disabled={ocrLoading}
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                className="secondary-btn"
+                onClick={clearPendingImages}
+                disabled={ocrLoading || pendingImages.length === 0}
+              >
+                Clear queue
+              </button>
+              <button
+                type="button"
+                className="secondary-btn"
+                onClick={onProcessPendingImages}
+                disabled={ocrLoading || pendingImages.length === 0}
+              >
+                {ocrLoading ? 'Processing...' : 'Process'}
+              </button>
+            </div>
+          </div>
+        </div>
+      ) : null}
+      {previewImage ? (
+        <div className="image-preview-overlay" onMouseDown={() => setPreviewImage(null)}>
+          <div className="image-preview-modal" onMouseDown={(event) => event.stopPropagation()}>
+            <div className="image-preview-head">
+              <div className="image-preview-name" title={previewImage.name}>
+                {previewImage.name}
+              </div>
+              <button type="button" className="secondary-btn" onClick={() => setPreviewImage(null)}>
+                Close
+              </button>
+            </div>
+            <div className="image-preview-body">
+              <img src={previewImage.url} alt={previewImage.name} className="image-preview-full" />
             </div>
           </div>
         </div>
